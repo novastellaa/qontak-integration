@@ -6,27 +6,24 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 import { createPrediction } from "./controllers/flowise.js";
+import { handleQontakWebhook } from "./controllers/flowise.js";
+
 
 const app = express();
-const PORT = process.env.PORT || 8000;
-
-// Enable CORS
-app.use(cors({
-    origin: "http://localhost:5000", // Ganti dengan origin frontend Anda
-}));
+const URL = process.env.URL
 
 
-// Set up multer for file upload
 const upload = multer({ dest: "uploads/" });
 
 app.use(express.static("public"));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-// POST endpoint to handle form-data (file + message)
-app.post("/api/flowise", upload.single("file"), createPrediction);
 
-// Listen to the specified port
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+app.post("/api/flowise", upload.single("file"), createPrediction);
+app.post("/webhook/qontak", handleQontakWebhook);
+
+
+app.listen(5000, () => {
+    console.log(`Server is running on URL ${URL}`);
 });
