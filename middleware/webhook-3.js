@@ -1,19 +1,21 @@
 import express from "express";
 import axios from "axios";
 import bodyParser from "body-parser";
+import fetch from "node-fetch";
+import fs from "fs";
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 6666;
 
-// Middleware untuk parsing JSON
 app.use(bodyParser.json());
 
+// Create Prediction
 const createPrediction = async(req, res) => {
     const { message } = req.body;
     const file = req.file;
 
-    console.log("Manual Input - Message:", message);
-    if (file) console.log("Manual Input - Uploaded File:", file.originalname);
+    console.log("Received Message:", message);
+    if (file) console.log("Uploaded File:", file.originalname);
 
     try {
         const payload = { question: message };
@@ -46,9 +48,8 @@ const createPrediction = async(req, res) => {
         const data = await response.json();
         console.log("Flowise Response:", data);
 
-        // Modifikasi pengecekan error untuk menghindari error saat mengakses status
         if (data && data.text) {
-            return data.text
+            return data.text;
         } else {
             throw new Error("Unexpected response from Flowise: Missing 'text' field");
         }
@@ -64,14 +65,13 @@ const createPrediction = async(req, res) => {
 
 // Received message from qontak
 export const receiveMessage = async(req, res) => {
-    const message = req.body.message; // Pesan dari Qontak
+    const { message, sender_id } = req.body;
+    console.log("Payload yang diterima:", req.body);
 
     try {
-        // Kirim pesan ke Flowise untuk diproses
         const flowiseReply = await createPrediction({ body: { message } });
 
-        // Kirim balasan ke Qontak
-        await sendToQontak(flowiseReply);
+        await sendToQontak(flowiseReply, sender_id);
 
         res.status(200).send("OK");
     } catch (error) {
@@ -81,10 +81,11 @@ export const receiveMessage = async(req, res) => {
 };
 
 
-// send message
-export const sendToQontak = async(message) => {
+
+// Send message to qontak
+export const sendToQontak = async(message, sender_id) => {
     const payload = {
-        to: 'recipient_phone_number',
+        to: sender_id,
         message: message
     };
 

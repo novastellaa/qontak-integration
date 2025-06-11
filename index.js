@@ -1,7 +1,7 @@
 import express from "express";
 import bodyParser from "body-parser";
 import multer from "multer";
-import cors from "cors"; // Import CORS
+import cors from "cors";
 import * as dotenv from "dotenv";
 dotenv.config();
 
