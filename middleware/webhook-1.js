@@ -54,7 +54,6 @@ export const createPrediction = async(req, res) => {
 export const handleQontakWebhook = async(req, res) => {
     const { message, sender_id } = req.body;
 
-    // Cek apakah payload lengkap
     if (!message || !sender_id) {
         return res.status(400).json({ error: "Payload tidak lengkap." });
     }
@@ -62,7 +61,6 @@ export const handleQontakWebhook = async(req, res) => {
     console.log("Pesan masuk dari Qontak:", message);
 
     try {
-        // Mengirimkan pertanyaan ke Flowise untuk mendapatkan balasan
         const flowiseRes = await fetch(`${process.env.FLOWISE_URL}/api/v1/prediction/${process.env.FLOW_ID}`, {
             method: "POST",
             headers: {
@@ -75,29 +73,26 @@ export const handleQontakWebhook = async(req, res) => {
         if (!flowiseRes.ok) {
             const errorText = await flowiseRes.text();
             throw new Error(`Flowise error: ${flowiseRes.status} - ${errorText}`);
-        }
+        };
 
         const flowiseData = await flowiseRes.json();
         const botReply = flowiseData.text || "maaf";
 
-        // Menyusun payload untuk Qontak
         const qontakPayload = {
-            "to_number": "628117661000", // The recipient's phone number
-            "to_name": "Burhanudin Hakim", // The recipient's name
-            "message_template_id": "2c546373-323b-481e-8cf5-c1b9b7e99a2f", // The message template ID
-            "channel_integration_id": "58d68cb0-fcdc-4d95-a48b-a94d9bb145e8", // The channel integration ID (WhatsApp)
+            "to_number": "628117661000",
+            "to_name": "Burhanudin Hakim",
+            "message_template_id": "2c546373-323b-481e-8cf5-c1b9b7e99a2f",
+            "channel_integration_id": "58d68cb0-fcdc-4d95-a48b-a94d9bb145e8",
             "language": {
-                "code": "id" // Language code (Indonesian in this case)
+                "code": "id"
             },
             "parameters": {
                 "body": []
             }
         };
 
-        // debugging
         console.log("Payload yang dikirim ke Qontak:", JSON.stringify(qontakPayload));
 
-        // Mengirimkan balasan ke Qontak
         const qontakRes = await fetch("https://service-chat.qontak.com/api/open/v1/broadcasts/whatsapp/direct", {
             method: "POST",
             headers: {
@@ -112,11 +107,9 @@ export const handleQontakWebhook = async(req, res) => {
             throw new Error(`Qontak send error: ${qontakRes.status} - ${errText}`);
         }
 
-        // Menyampaikan bahwa balasan berhasil dikirim
         res.status(200).json({ message: "Balasan berhasil dikirim ke Qontak" });
 
     } catch (error) {
-        // Menangani error yang terjadi selama proses
         console.error("Webhook Error:", error.message);
         res.status(500).json({ error: "Terjadi kesalahan: " + error.message });
     }

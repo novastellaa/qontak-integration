@@ -5,12 +5,13 @@ import cors from "cors"; // Import CORS
 import * as dotenv from "dotenv";
 dotenv.config();
 
-import { createPrediction } from "./controllers/flowise.js";
-import { handleQontakWebhook } from "./controllers/flowise.js";
+import { createPrediction } from "./middleware/webhook-1.js";
+// import { handleQontakWebhook } from "./controllers/flowise.js";
+import { receiveMessage } from "./middleware/webhook-3.js";
 
 
 const app = express();
-const URL = process.env.URL
+const PORT = process.env.PORT || 8000;
 
 
 const upload = multer({ dest: "uploads/" });
@@ -21,9 +22,9 @@ app.use(bodyParser.json());
 
 
 app.post("/api/flowise", upload.single("file"), createPrediction);
-app.post("/webhook/qontak", handleQontakWebhook);
+app.post("/webhook/qontak", receiveMessage);
 
 
-app.listen(5000, () => {
-    console.log(`Server is running on URL ${URL}`);
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });
