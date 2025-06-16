@@ -1,0 +1,60 @@
+Berikut adalah **catatan rangkuman dan penjelasan clean code** yang bisa kamu salin ke `note.txt`:
+
+---
+
+## ✍️ Ringkasan & Penjelasan Kode Integrasi Flowise - Qontak
+
+### 1. `createPrediction(message, file)`
+
+Fungsi ini mengirim pertanyaan ke API **Flowise** untuk mendapatkan jawaban berdasarkan `message` user.
+
+* Jika ada file, file dikonversi ke base64 lalu dikirim sebagai lampiran.
+* Menggunakan `fetch()` untuk POST ke `FLOWISE_URL`.
+* Response Flowise disimpan dan dikembalikan jika valid.
+
+### 2. `getLastBotReplyFromRoom(room_id)`
+
+Mengambil pesan terakhir dari Qontak untuk mengecek apakah pesan terakhir berasal dari **bot (`agent`)**.
+
+* Hanya mengembalikan isi pesan terakhir jika dikirim oleh agent.
+* Digunakan untuk deteksi **looping** (pesan balasan bot dikirim ulang oleh user).
+
+### 3. `receiveMessage(req, res)`
+
+Endpoint utama untuk menerima pesan dari webhook Qontak.
+
+* Mengecek nomor pengirim (`allowedNumber`) dan asal pesan (bukan dari agent).
+* Deteksi **looping**:
+
+  * Dengan membandingkan pesan terkini user vs pesan terakhir dari bot Qontak.
+  * Dengan membandingkan pesan terkini user vs pesan terakhir yang dikirim oleh bot (lokal).
+* Jika lolos deteksi, message dikirim ke Flowise untuk dijawab.
+* Jawaban dikirim ke Qontak via `sendToQontak`, lalu disimpan di variabel lokal `lastBotMessages`.
+
+### 4. `sendToQontak(message, sender_id, room_id)`
+
+Mengirim **pesan balasan bot** ke room di Qontak.
+
+* Payload: text message, room\_id, sender\_id.
+* Jika berhasil, juga menyimpan pesan ke `lastBotMessages` untuk deteksi loop lokal.
+
+### 5. `updateRoomTag(room_id, tag)`
+
+Mengubah tag pada room Qontak (misal jadi `unanswered` kalau Flowise tidak bisa menjawab).
+
+* Mengirim request POST ke endpoint Qontak dengan tag baru.
+
+---
+
+## 🧠 Notes Teknis
+
+* Semua request menggunakan `node-fetch`.
+* Penyimpanan pesan terakhir bot dilakukan dua kali:
+
+  * Dari **Qontak** (melalui API `getLastBotReplyFromRoom`)
+  * Dari **lokal memory** (`lastBotMessages`)
+* Optional chaining (`?.`) **tidak digunakan** — diganti dengan `&&` dan ternary demi kompatibilitas penuh.
+* Pesan yang identik dengan respon bot terakhir **tidak diproses lagi** (loop breaker).
+* Nomor yang diperbolehkan (`allowedNumber`) di-hardcode agar tidak disalahgunakan.
+
+---
