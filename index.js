@@ -1,32 +1,35 @@
 import express from "express";
 import bodyParser from "body-parser";
 import multer from "multer";
-import cors from "cors"; // Import CORS
+import cors from "cors";
 import * as dotenv from "dotenv";
+
+
 dotenv.config();
 
-import { createPrediction } from "./controllers/flowise.js";
+import { createPrediction } from "./middleware/webhook-1.js";
+// import { handleQontakWebhook } from "./controllers/flowise.js";
+import { receiveMessage } from "./middleware/webhook-3.js";
+
+
 
 const app = express();
-const PORT = process.env.PORT || 8000;
-
-// Enable CORS
-app.use(cors({
-    origin: "http://localhost:5000", // Ganti dengan origin frontend Anda
-}));
+const PORT = process.env.PORT || 6666;
 
 
-// Set up multer for file upload
 const upload = multer({ dest: "uploads/" });
 
+
+app.use(cors());
 app.use(express.static("public"));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-// POST endpoint to handle form-data (file + message)
-app.post("/api/flowise", upload.single("file"), createPrediction);
 
-// Listen to the specified port
+app.post("/api/flowise", upload.single("file"), createPrediction);
+app.post("/webhook/qontak", receiveMessage);
+
+
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
