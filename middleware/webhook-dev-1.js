@@ -7,7 +7,7 @@ import fs from "fs";
 const app = express();
 app.use(bodyParser.json());
 
-const allowedNumber = ["6285691263021", "628996103676"];
+const allowedNumber = "6285691263021"
 let lastBotMessages = {};
 
 
@@ -113,6 +113,12 @@ export const receiveMessage = async(req, res) => {
         return res.status(200).send("Pesan berasal dari agent, tidak diproses.");
     }
 
+    if (isDetailedQuestion(message)) {
+        await updateRoomTag(roomId, 'agen'); // Update tag ke agen
+        console.log("Tag diubah ke 'agen', pertanyaan lebih mendetail.");
+        return res.status(200).send("Pertanyaan terlalu mendetail, diteruskan ke agen.");
+    }
+
     try {
         const lastBotReply = await getLastBotReplyFromRoom(roomId);
         if (message.trim() === lastBotReply.trim()) {
@@ -144,7 +150,19 @@ export const receiveMessage = async(req, res) => {
 };
 
 
-// --- 4. SEND MESSAGE TO QONTAK
+// --- 4. SEPARATE DETAILED QUESTION
+const isDetailedQuestion = (message) => {
+    const keywords = ["error", "bug", "problem", "tidak bisa", "solusi", "tutorial", "langkah", "asuransi", "kebijakan", "detail", "refund", "penjelasan", "cara kerja", "spesifikasi", "persyaratan", "add on", "benefit"];
+
+    // Jika panjang pesan lebih dari 20 kata atau ada kata kunci mendetail, anggap pertanyaan mendalam
+    if (message.split(" ").length > 20 || keywords.some(keyword => message.toLowerCase().includes(keyword))) {
+        return true;
+    }
+    return false;
+};
+
+
+// --- 5. SEND MESSAGE TO QONTAK
 export const sendToQontak = async(message, sender_id, room_id, retryCount = 0) => {
     const payload = {
         room_id: room_id,
@@ -179,27 +197,26 @@ export const sendToQontak = async(message, sender_id, room_id, retryCount = 0) =
 };
 
 
+// --- .6 UPDATE TAG ON ROOM
+const updateRoomTag = async(room_id, tag) => {
+    try {
+        const response = await fetch("https://service-chat.qontak.com/api/open/v1/rooms/" + room_id + "/tags", {
+            method: 'POST',
+            headers: {
+                'Authorization': "Bearer " + process.env.QONTAK_API_KEY,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ tags: [tag] })
+        });
 
-// --- 5. UPDATE TAG ON ROOM
-// const updateRoomTag = async(room_id, tag) => {
-//     try {
-//         const response = await fetch("https://service-chat.qontak.com/api/open/v1/rooms/" + room_id + "/tags", {
-//             method: 'POST',
-//             headers: {
-//                 'Authorization': "Bearer " + process.env.QONTAK_API_KEY,
-//                 'Content-Type': 'application/json',
-//             },
-//             body: JSON.stringify({ tags: [tag] })
-//         });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error("Qontak API error: " + response.status + " - " + errorText);
+        }
 
-//         if (!response.ok) {
-//             const errorText = await response.text();
-//             throw new Error("Qontak API error: " + response.status + " - " + errorText);
-//         }
-
-//         const data = await response.json();
-//         console.log("Tag berhasil diperbarui:", data);
-//     } catch (error) {
-//         console.error("Error dalam memperbarui tag:", error);
-//     }
-// };
+        const data = await response.json();
+        console.log("Tag berhasil diperbarui:", data);
+    } catch (error) {
+        console.error("Error dalam memperbarui tag:", error);
+    }
+};
