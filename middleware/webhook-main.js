@@ -2,18 +2,17 @@ import express from "express";
 import bodyParser from "body-parser";
 import fetch from "node-fetch";
 import fs from "fs";
-// import { messageQueue } from "../utils/queue.js";
 
 const app = express();
 app.use(bodyParser.json());
 
-const allowedNumber = "6285691263021"
+const allowedNumber = ["6285220300055", "628996103676", "6285691263021"] //  pak andy
 let lastBotMessages = {};
 
 
 // --- 1. CREATE PREDICTION FROM FLOWISE
 const createPrediction = async(message, file = null) => {
-    console.log("Pesan diterima:", message);
+    console.log("🔔 Pesan diterima:", message);
 
     try {
         const payload = { question: message };
@@ -63,7 +62,7 @@ const createPrediction = async(message, file = null) => {
 // --- 2. GET LAST BOT REPLY FROM QONTAK
 const getLastBotReplyFromRoom = async(room_id) => {
     try {
-        const response = await fetch("https://service-chat.qontak.com/api/open/v1/rooms/" + room_id, {
+        const response = await fetch(`https://service-chat.qontak.com/api/open/v1/rooms/${room_id}`, {
             method: 'GET',
             headers: {
                 'Authorization': "Bearer " + process.env.QONTAK_API_KEY,
@@ -77,7 +76,7 @@ const getLastBotReplyFromRoom = async(room_id) => {
             const lastMessage = result.data && result.data.last_message;
 
             if (lastMessage && lastMessage.participant_type === 'agent') {
-                console.log("Last bot reply:", lastMessage.text);
+                console.log("💬 Last bot reply:", lastMessage.text);
                 return lastMessage.text || "";
             }
             return "";
@@ -103,8 +102,8 @@ export const receiveMessage = async(req, res) => {
     const senderNumber = room && room.account_uniq_id ? room.account_uniq_id : "";
     const roomId = room_id || (room && room.id ? room.id : "");
 
-    if (allowedNumber.indexOf(senderNumber) === -1) {
-        console.log("Nomor " + senderNumber + " tidak diizinkan.");
+    if (!allowedNumber.includes(senderNumber)) {
+        console.log("❌ Nomor " + senderNumber + " tidak diizinkan.");
         return res.status(200).send("Nomor tidak diizinkan untuk testing.");
     }
 
@@ -113,33 +112,40 @@ export const receiveMessage = async(req, res) => {
         return res.status(200).send("Pesan berasal dari agent, tidak diproses.");
     }
 
-    if (isDetailedQuestion(message)) {
-        await updateRoomTag(roomId, 'agen'); // Update tag ke agen
-        console.log("Tag diubah ke 'agen', pertanyaan lebih mendetail.");
-        return res.status(200).send("Pertanyaan terlalu mendetail, diteruskan ke agen.");
-    }
-
     try {
+        const tags = await getRoomTags(roomId);
+        if (tags.includes("agen")) {
+            console.log("👌 Room sudah ditangani agen, bot tidak akan merespons.");
+            return res.status(200).send("Room sudah dialihkan ke agen, bot tidak menangani pesan.");
+        }
+
+        if (isDetailedQuestion(message)) {
+            await updateRoomTag(roomId, ['agen']);
+            // await takeOverRoom(roomId);
+            console.log("🙏 Room diambil alih oleh agen karena pertanyaan mendetail.");
+            return res.status(200).send("Pertanyaan mendetail, agen mengambil alih.");
+        }
+
         const lastBotReply = await getLastBotReplyFromRoom(roomId);
         if (message.trim() === lastBotReply.trim()) {
-            console.log("Loop terdeteksi: user mengirim ulang pesan yang sebelumnya dibalas bot.");
+            console.log("➰ Loop terdeteksi: user mengirim ulang pesan yang sebelumnya dibalas bot.");
             return res.status(200).send("Loop terdeteksi, dihentikan.");
         }
 
         if (lastBotMessages[roomId] && message.trim() === lastBotMessages[roomId]) {
-            console.log("Loop terdeteksi: user mengirim ulang pesan yang sebelumnya dibalas bot.");
+            console.log("➰ Loop terdeteksi: user mengirim ulang pesan yang sebelumnya dibalas bot.");
             return res.status(200).send("Loop terdeteksi, dibatalkan.");
         }
 
         const flowiseReply = await createPrediction(message);
         if (!flowiseReply) {
-            await updateRoomTag(roomId, 'unanswered');
+            // await updateRoomTag(roomId, 'unanswered');
             return res.status(200).send("Tidak dapat menjawab pertanyaan, tag diubah.");
         }
 
         await sendToQontak(flowiseReply, senderNumber, roomId);
         lastBotMessages[roomId] = flowiseReply.trim();
-        console.log("LastBotMessage recorded:", lastBotMessages[roomId]);
+        console.log("💬 LastBotMessage recorded:", lastBotMessages[roomId]);
 
         return res.status(200).send("Pesan berhasil diproses.");
 
@@ -154,8 +160,7 @@ export const receiveMessage = async(req, res) => {
 const isDetailedQuestion = (message) => {
     const keywords = ["error", "bug", "problem", "tidak bisa", "solusi", "tutorial", "langkah", "asuransi", "kebijakan", "detail", "refund", "penjelasan", "cara kerja", "spesifikasi", "persyaratan", "add on", "benefit"];
 
-    // Jika panjang pesan lebih dari 20 kata atau ada kata kunci mendetail, anggap pertanyaan mendalam
-    if (message.split(" ").length > 20 || keywords.some(keyword => message.toLowerCase().includes(keyword))) {
+    if (keywords.some(keyword => message.toLowerCase().includes(keyword))) {
         return true;
     }
     return false;
@@ -187,7 +192,7 @@ export const sendToQontak = async(message, sender_id, room_id, retryCount = 0) =
         }
 
         const data = await response.json();
-        console.log("Response dari Qontak:", data);
+        console.log("✅ Response dari Qontak:", data);
 
         lastBotMessages[room_id] = message.trim();
 
@@ -200,23 +205,72 @@ export const sendToQontak = async(message, sender_id, room_id, retryCount = 0) =
 // --- .6 UPDATE TAG ON ROOM
 const updateRoomTag = async(room_id, tag) => {
     try {
-        const response = await fetch("https://service-chat.qontak.com/api/open/v1/rooms/" + room_id + "/tags", {
-            method: 'POST',
+        const formData = new FormData();
+        formData.append("tag", tag);
+
+        const response = await fetch(`https://service-chat.qontak.com/api/open/v1/rooms/${room_id}/tags`, {
+            method: "POST",
             headers: {
-                'Authorization': "Bearer " + process.env.QONTAK_API_KEY,
-                'Content-Type': 'application/json',
+                Authorization: `Bearer ${process.env.QONTAK_API_KEY}`,
             },
-            body: JSON.stringify({ tags: [tag] })
+            body: formData,
         });
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error("Qontak API error: " + response.status + " - " + errorText);
+            throw new Error(`Qontak API error: ${response.status} - ${errorText}`);
         }
 
-        const data = await response.json();
-        console.log("Tag berhasil diperbarui:", data);
+        console.log(`Tag '${tag}' berhasil ditambahkan ke room ${room_id}`);
     } catch (error) {
         console.error("Error dalam memperbarui tag:", error);
+    }
+};
+
+
+// --- .7 TAKE OVER ROOM
+// const takeOverRoom = async(room_id) => {
+//     try {
+//         const response = await fetch(`
+//             https: //service-chat.qontak.com/api/open/v1/rooms/${room_id}/takeover`, {
+//             method: "POST",
+//             headers: {
+//                 Authorization: `Bearer ${process.env.QONTAK_API_KEY}`,
+//                 "Content-Type": "application/json",
+//             }
+//         });
+
+//         if (!response.ok) {
+//             const errorText = await response.text();
+//             throw new Error(`Qontak API error: ${response.status} - ${errorText}`);
+//         }
+
+//         console.log(`Room ${room_id} berhasil diambil alih oleh agen.`);
+//     } catch (error) {
+//         console.error("Error dalam mengambil alih room:", error);
+//     }
+// };
+
+
+
+// --- .8 GET ROOM TAG
+const getRoomTags = async(room_id) => {
+    try {
+        const response = await fetch(`https://service-chat.qontak.com/api/open/v1/rooms/${room_id}`, {
+            method: "GET",
+            headers: {
+                Authorization: `Bearer ${process.env.QONTAK_API_KEY}`,
+                "Content-Type": "application/json",
+            }
+        });
+
+        const data = await response.json();
+        if (data.status === "success" && data.data.tags) {
+            return data.data.tags; // Daftar tag yang ada di room
+        }
+        return [];
+    } catch (error) {
+        console.error("Error mendapatkan tag room:", error);
+        return [];
     }
 };

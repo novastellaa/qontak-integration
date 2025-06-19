@@ -1,40 +1,54 @@
-import { Worker } from "bullmq";
-import IORedis from "ioredis";
-import { createPrediction, sendToQontak, updateRoomTag } from "./middleware/webhook-3.js";
-import { getLastBotReplyFromRoom } from "./middleware/webhook-3.js";
+import Queue from "bull";
+import dotenv from "dotenv";
+import { createPrediction, sendToQontak } from "../middleware/webhook-dev.js";
 
-const connection = new IORedis(process.env.REDIS_URL || "redis://localhost:6379");
+dotenv.config();
+
+const messageQueue = new Queue("qontak-messages", {
+    redis: { host: "127.0.0.1", port: 6379 }
+});
 
 const lastBotMessages = {};
 
-const worker = new Worker("qontakMessageQueue", async job => {
-    const { message, room, room_id, senderNumber, roomId } = job.data;
+messageQueue.process("handleMessage", async(job) => {
+    try {
+        const { message, roomId, senderNumber, sender } = job.data;
 
-    const lastBotReply = await getLastBotReplyFromRoom(roomId);
-    if (message.trim() === lastBotReply.trim()) {
-        console.log("Loop terdeteksi di worker.");
-        return;
+        console.log("📦 Processing job:", { message, roomId, senderNumber });
+
+        if (!roomId || typeof roomId !== "string" || roomId.trim() === "") {
+            console.warn("⚠️ Invalid roomId:", roomId);
+            return;
+        }
+
+        if (!senderNumber || !message) {
+            console.warn("⚠️ Missing essential data in job:", job.data);
+            return;
+        }
+
+        if (sender && sender.participant_type === 'agent') {
+            console.log("🛑 Message is from agent, skipping.");
+            return;
+        }
+
+        if (lastBotMessages[roomId] && lastBotMessages[roomId] === message.trim()) {
+            console.log("🔁 Detected bot reply being reprocessed. Skipping.");
+            return res.status(200).send("Bot reply detected, not reprocessed.");
+        }
+
+
+        const reply = await createPrediction(message);
+        if (!reply) {
+            console.warn("❗No reply from Flowise.");
+            return;
+        }
+
+        await sendToQontak(reply, senderNumber, roomId);
+
+        lastBotMessages[roomId] = reply.trim();
+        console.log("✅ Reply sent & tracked:", reply);
+
+    } catch (err) {
+        console.error("💥 Error while processing job:", err);
     }
-
-    if (lastBotMessages[roomId] && message.trim() === lastBotMessages[roomId]) {
-        console.log("Loop dari cache terdeteksi di worker.");
-        return;
-    }
-
-    const reply = await createPrediction(message);
-    if (!reply) {
-        await updateRoomTag(roomId, 'unanswered');
-        return;
-    }
-
-    await sendToQontak(reply, senderNumber, roomId);
-    lastBotMessages[roomId] = reply.trim();
-}, { connection });
-
-worker.on("completed", job => {
-    console.log(`Job ${job.id} selesai.`);
-});
-
-worker.on("failed", (job, err) => {
-    console.error(`Job ${job.id} gagal:`, err);
 });

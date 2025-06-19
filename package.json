@@ -13,6 +13,7 @@
     "dependencies": {
         "axios": "^1.9.0",
         "body-parser": "^1.20.2",
+        "bull": "^4.16.5",
         "bullmq": "^5.54.0",
         "cors": "^2.8.5",
         "dotenv": "^16.3.1",
