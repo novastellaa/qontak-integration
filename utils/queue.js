@@ -1,6 +1,7 @@
-import { Queue } from "bullmq";
-import IORedis from "ioredis";
+import Queue from 'bull';
 
-const connection = new IORedis(process.env.REDIS_URL || "redis://localhost:6379");
+const messageQueue = new Queue('qontak-messages', {
+    redis: { host: '127.0.0.1', port: 6379 }
+});
 
-export const messageQueue = new Queue("qontakMessageQueue", { connection });
+export default messageQueue;

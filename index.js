@@ -7,9 +7,8 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-import { createPrediction } from "./middleware/webhook-1.js";
-// import { handleQontakWebhook } from "./controllers/flowise.js";
-import { receiveMessage } from "./middleware/webhook-qontak.js";
+
+import { receiveMessage } from "./middleware/webhook-main.js";
 
 
 
@@ -26,7 +25,6 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
 
-app.post("/api/flowise", upload.single("file"), createPrediction);
 app.post("/webhook/qontak", receiveMessage);
 
 
