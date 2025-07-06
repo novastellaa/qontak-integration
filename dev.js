@@ -1,4 +1,3 @@
-// dev.js
 import express from "express";
 import bodyParser from "body-parser";
 import multer from "multer";
@@ -10,7 +9,7 @@ dotenv.config();
 import { receiveMessage } from "./middleware/webhook-dev.js";
 
 const app = express();
-const PORT = 6666;
+const PORT = process.env.PORT || 6666;
 
 const upload = multer({ dest: "uploads/" });
 
