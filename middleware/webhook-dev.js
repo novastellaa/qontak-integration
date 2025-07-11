@@ -27,24 +27,24 @@ export const createPrediction = async(message, roomId, chatId, file = null) => {
         };
 
         if (file) {
-            const USE_BASE64 = false;
-            if (USE_BASE64) {
+            if (file.path) {
                 const fileBuffer = fs.readFileSync(file.path);
                 const fileBase64 = fileBuffer.toString("base64");
 
-                payload.uploads = [{
+                payload.files = [{
                     data: "data:" + file.mimetype + ";base64," + fileBase64,
-                    type: "image", // Gunakan "image" untuk base64
+                    type: "image",
                     name: file.originalname,
                 }];
-            } else {
-                payload.uploads = [{
+            } else if (file.url) {
+                payload.files = [{
                     data: file.url,
                     type: "image_url",
                     name: file.originalname,
                 }];
             }
         }
+
 
         console.log("Payload ke Flowise:", payload);
 
@@ -202,7 +202,7 @@ export const receiveMessage = async(req, res) => {
         const rateLimitKey = `rate_limit:${chatId}`;
         const currentCount = await redis.incr(rateLimitKey);
         if (currentCount === 1) await redis.expire(rateLimitKey, 60);
-        if (currentCount > 5) {
+        if (currentCount > 10) {
             console.log(`❌ User ${chatId} melewati batas rate limit.`);
             return res.status(429).send("Terlalu banyak pesan. Silakan tunggu sebentar.");
         }

@@ -1,6 +1,9 @@
 import Queue from "bull";
 import dotenv from "dotenv";
 import { createPrediction, sendToQontak } from "../middleware/webhook-dev.js";
+import { extractTextFromImage } from "./ocr.js";
+import fs from "fs";
+
 
 dotenv.config();
 
@@ -38,19 +41,30 @@ messageQueue.process("handleMessage", 10, async(job) => {
             return;
         }
 
+        let finalMessage = message;
+
+        if (file && file.path) {
+            tempFile = file;
+            console.log("📝 Melakukan OCR pada file:", tempFile.path);
+            const ocrText = await extractTextFromImage(tempFile.path);
+            console.log(ocrText);
+
+            if (!message || message.trim() === "") {
+                finalMessage = ocrText;
+            } else {
+                finalMessage = message + "\n\n" + ocrText;
+            }
+        }
+
+
         if (lastBotMessages[roomId] && lastBotMessages[roomId] === message.trim()) {
             console.log("🔁 Detected bot reply being reprocessed. Skipping.");
             return;
         }
 
-        // --- Handle file kalau ada ---
-        if (file && file.path) {
-            tempFile = file;
-        }
-
         // Kirim ke Flowise
         const reply = await createPrediction(
-            message,
+            finalMessage,
             sessionId,
             chatId,
             tempFile
@@ -74,10 +88,14 @@ messageQueue.process("handleMessage", 10, async(job) => {
         console.error("💥 Error while processing job:", err);
 
     } finally {
-        // Pastikan temp file dihapus
-        if (tempFile && tempFile.cleanup) {
-            tempFile.cleanup();
-            console.log("🗑️ Temp file deleted:", tempFile.path);
+        if (tempFile && tempFile.path) {
+            fs.unlink(tempFile.path, (err) => {
+                if (err) {
+                    console.error("❌ Gagal hapus file:", err.message);
+                } else {
+                    console.log("🗑️ File deleted:", tempFile.path);
+                }
+            });
         }
     }
 });

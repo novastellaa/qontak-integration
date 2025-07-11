@@ -6,7 +6,7 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-import { receiveMessage } from "./middleware/webhook-dev.js";
+import { receiveMessage } from "./middleware/webhook-8jul.js";
 
 const app = express();
 const PORT = process.env.PORT || 6666;
@@ -17,7 +17,6 @@ app.use(cors());
 app.use(express.static("public"));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
-
 
 app.post("/webhook/qontak", upload.single("file"), receiveMessage);
 

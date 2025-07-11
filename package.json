@@ -24,6 +24,8 @@
         "multer": "^2.0.1",
         "node-fetch": "^3.3.2",
         "nodemon": "^3.0.1",
+        "openai": "^5.8.3",
+        "tesseract.js": "^6.0.1",
         "tmp": "^0.2.3"
     }
 }
