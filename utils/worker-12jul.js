@@ -2,8 +2,9 @@ import dotenv from "dotenv";
 import fs from "fs";
 import messageQueue from "./queue.js";
 import redis from "../utils/redis.js";
+import Logger from "../utils/logger.js";
 
-import { createPrediction, sendToQontak } from "../middleware/webhook-8jul.js";
+import { createPrediction, sendToQontak } from "../middleware/feat-image.js";
 import { analyzeImageWithOpenAI } from "./vision-openai.js";
 
 
@@ -12,7 +13,7 @@ dotenv.config();
 const lastBotMessages = {};
 
 messageQueue.process("handleMessage", 10, async(job) => {
-    console.log("🚚 DATA DITERIMA DI WORKER:", JSON.stringify(job.data, null, 2));
+    Logger.info("🚚 DATA DITERIMA DI WORKER:", JSON.stringify(job.data, null, 2));
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -27,20 +28,20 @@ messageQueue.process("handleMessage", 10, async(job) => {
         if (fileString) {
             try {
                 file = JSON.parse(fileString);
-                console.log("📄 File JSON berhasil di-parse:", file);
+                Logger.info("📄 File JSON berhasil di-parse:", file);
             } catch (e) {
-                console.warn("⚠️ Gagal parse file JSON:", e);
+                Logger.warn("⚠️ Gagal parse file JSON:", e);
                 file = null;
             }
         }
 
         if (file) {
-            console.log("🖼️ Worker menerima file:", file);
+            Logger.info("🖼️ Worker menerima file:", file);
         } else {
-            console.log("⚠️ Worker TIDAK menerima file.");
+            Logger.info("⚠️ Worker TIDAK menerima file.");
         }
 
-        console.log("<3 Processing job:", {
+        Logger.info("<3 Processing job:", {
             message,
             roomId,
             chatId,
@@ -49,39 +50,39 @@ messageQueue.process("handleMessage", 10, async(job) => {
         });
 
         if (!roomId || typeof roomId !== "string" || roomId.trim() === "") {
-            console.warn("⚠️ Invalid roomId:", roomId);
+            Logger.warn("⚠️ Invalid roomId:", roomId);
             return;
         }
 
         if (!chatId) {
-            console.warn("⚠️ Missing chatId in job:", job.data);
+            Logger.warn("⚠️ Missing chatId in job:", job.data);
             return;
         }
 
         if (!message && !file) {
-            console.warn("⚠️ No message and no file provided in job:", job.data);
+            Logger.warn("⚠️ No message and no file provided in job:", job.data);
             return;
         }
 
         if (sender && sender.participant_type === "agent") {
-            console.log("🛑 Message is from agent, skipping.");
+            Logger.info("🛑 Message is from agent, skipping.");
             return;
         }
 
         let finalMessage = message || "";
 
         if (file && file.url) {
-            console.log("🕒 Delay sebelum kirim ke Vision API (3 detik)...");
+            Logger.info("🕒 Delay sebelum kirim ke Vision API (3 detik)...");
             await sleep(3000);
 
-            console.log("🖼️ Mengirim gambar ke OpenAI Vision:", file.url);
+            Logger.info("🖼️ Mengirim gambar ke OpenAI Vision:", file.url);
             try {
                 const visionDescription = await analyzeImageWithOpenAI(
                     file.url,
                     "Deskripsikan isi gambar ini secara detail."
                 );
 
-                console.log("🎯 Hasil Vision:", visionDescription);
+                Logger.info("🎯 Hasil Vision:", visionDescription);
 
                 finalMessage = [
                         message,
@@ -96,7 +97,7 @@ messageQueue.process("handleMessage", 10, async(job) => {
                 tempFile = null;
 
             } catch (error) {
-                console.error("❌ Vision API error:", error.message);
+                Logger.error("❌ Vision API error:", error.message);
                 finalMessage =
                     message ||
                     "[Image received but vision analysis failed.]";
@@ -110,7 +111,7 @@ messageQueue.process("handleMessage", 10, async(job) => {
             lastBotMessages[roomId] &&
             lastBotMessages[roomId] === finalMessage.trim()
         ) {
-            console.log("🔁 Detected bot reply being reprocessed. Skipping.");
+            Logger.info("🔁 Detected bot reply being reprocessed. Skipping.");
             return;
         }
 
@@ -123,13 +124,13 @@ messageQueue.process("handleMessage", 10, async(job) => {
         );
 
         if (!sessionId) {
-            console.warn(
+            Logger.warn(
                 "❗Warning: sessionId kosong. Memory mungkin tidak akan aktif."
             );
         }
 
         if (!reply) {
-            console.warn("❗No reply from Flowise.");
+            Logger.warn("❗No reply from Flowise.");
             return;
         }
 
@@ -137,16 +138,16 @@ messageQueue.process("handleMessage", 10, async(job) => {
 
         await redis.set(`lastBotMessage:${roomId}`, reply.trim());
 
-        console.log("✅ Reply sent & tracked:", reply);
+        Logger.info("✅ Reply sent & tracked:", reply);
     } catch (err) {
-        console.error("💥 Error while processing job:", err);
+        Logger.error("💥 Error while processing job:", err);
     } finally {
         if (tempFile && tempFile.path) {
             fs.unlink(tempFile.path, (err) => {
                 if (err) {
-                    console.error("❌ Gagal hapus file:", err.message);
+                    Logger.error("❌ Gagal hapus file:", err.message);
                 } else {
-                    console.log("🗑️ File deleted:", tempFile.path);
+                    Logger.info("🗑️ File deleted:", tempFile.path);
                 }
             });
         }

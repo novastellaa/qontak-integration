@@ -6,7 +6,7 @@ import fs from "fs";
 const app = express();
 app.use(bodyParser.json());
 
-const allowedNumber = ["6285691263021"] //  pak andy, a mamat, nova "6285220300055", "628996103676",
+const allowedNumber = process.env.ALLOWED_NUMBER;
 let lastBotMessages = {};
 
 

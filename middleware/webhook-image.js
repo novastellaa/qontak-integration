@@ -9,7 +9,7 @@ import redis from "../utils/redis.js";
 const app = express();
 app.use(bodyParser.json());
 
-const allowedNumber = "6285691263021"
+const allowedNumber = process.env.ALLOWED_NUMBER;
 
 let lastBotMessages = {};
 let messageBuffers = {};

@@ -3,7 +3,7 @@ import fs from "fs";
 import messageQueue from "./queue.js";
 import redis from "../utils/redis.js";
 
-import { createPrediction, sendToQontak } from "../middleware/webhook-8jul.js";
+import { createPrediction, sendToQontak } from "../middleware/feat-dataUsage.js";
 import { analyzeImageWithOpenAI } from "./vision-openai.js";
 
 
@@ -21,7 +21,7 @@ messageQueue.process("handleMessage", 10, async(job) => {
     let tempFile = null;
 
     try {
-        const { message, roomId, sender, sessionId, chatId, file: fileString } = job.data;
+        const { message, roomId, sender, sessionId, chatId, flowiseContext, file: fileString } = job.data;
         let file = null;
 
         if (fileString) {
@@ -45,6 +45,7 @@ messageQueue.process("handleMessage", 10, async(job) => {
             roomId,
             chatId,
             sessionId,
+            flowiseContext,
             file,
         });
 
@@ -117,9 +118,10 @@ messageQueue.process("handleMessage", 10, async(job) => {
         // Kirim ke Flowise
         const reply = await createPrediction(
             finalMessage,
-            sessionId,
+            roomId,
             chatId,
-            null
+            flowiseContext || {},
+            file
         );
 
         if (!sessionId) {
@@ -134,7 +136,6 @@ messageQueue.process("handleMessage", 10, async(job) => {
         }
 
         await sendToQontak(reply, chatId, roomId);
-
         await redis.set(`lastBotMessage:${roomId}`, reply.trim());
 
         console.log("✅ Reply sent & tracked:", reply);

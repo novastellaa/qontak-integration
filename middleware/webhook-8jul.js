@@ -9,7 +9,7 @@ import redis from "../utils/redis.js";
 const app = express();
 app.use(bodyParser.json());
 
-const allowedNumber = "6285691263021"
+const allowedNumber = process.env.ALLOWED_NUMBER;
 
 let lastBotMessages = {};
 let messageBuffers = {};
@@ -205,6 +205,12 @@ export const receiveMessage = async(req, res) => {
         return res.status(200).send("Pesan berasal dari agent, tidak diproses.");
     }
 
+    const lastBotMessage = await redis.get(`lastBotMessage:${roomId}`);
+    if (lastBotMessage && message.trim() === lastBotMessage) {
+        console.log("❌ Detected bot message loop. Ignoring.");
+        return res.status(200).send("Bot message detected, skipping.");
+    }
+
     try {
         // Rate limiting
         const rateLimitKey = `rate_limit:${chatId}`;
@@ -319,7 +325,7 @@ export const receiveMessage = async(req, res) => {
 
 
 // --- 5. SEND MESSAGE TO QONTAK
-export const sendToQontak = async(message, sender_id, room_id, retryCount = 0) => {
+export const sendToQontak = async(message, sender_id, room_id) => {
     const payload = {
         room_id: room_id,
         sender_id: sender_id,
@@ -397,5 +403,35 @@ export const getRoomTags = async(room_id) => {
     } catch (error) {
         console.error("Error mendapatkan tag room:", error);
         return [];
+    }
+};
+
+
+// --- .8 VALIDATION VENDOR
+export const validationVendor = async() => {
+    try {
+        const rateLimitKey = `rate_limit:${chatId}`;
+        const currentCount = await redis.incr(rateLimitKey);
+        if (currentCount === 1) await redis.expire(rateLimitKey, 60);
+        if (currentCount > 10) {
+            console.log(`❌ User ${chatId} melewati batas rate limit.`);
+            return res.status(429).send("Terlalu banyak pesan. Silakan tunggu sebentar.");
+        }
+    } catch (error) {
+        console.error("Error dalam validasi vendor:", error);
+        return res.status(500).send("Terjadi kesalahan dalam validasi vendor.");
+    }
+};
+
+
+// --- .9 REQUEST VENDOR
+export const requestVendor = async() => {
+    try {
+        const response = await fetch('https://service-chat.qontak.com/api/open/v1/vendors/request', {
+            method: 'POST',
+            headers: ''
+        })
+    } catch (error) {
+        console.error("Error dalam mengirim permintaan vendor:", error);
     }
 };
