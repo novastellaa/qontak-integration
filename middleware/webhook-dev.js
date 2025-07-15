@@ -3,33 +3,52 @@ import bodyParser from "body-parser";
 import fetch from "node-fetch";
 import fs from "fs";
 import messageQueue from "../utils/queue.js";
+import redis from "../utils/redis.js";
+import { downloadFileToTemp } from "../utils/donwloadFileToTemp.js";
 
 const app = express();
 app.use(bodyParser.json());
 
-const allowedNumber = "6285691263021"
+const allowedNumber = process.env.ALLOWED_NUMBER;
+
 let lastBotMessages = {};
+let messageBuffers = {};
 
 
 // --- 1. CREATE PREDICTION FROM FLOWISE
-export const createPrediction = async(message, file = null) => {
+export const createPrediction = async(message, roomId, chatId, file = null) => {
     console.log("Pesan diterima:", message);
 
     try {
-        const payload = { question: message };
+        const payload = {
+            question: message || "[image_only_message]",
+            sessionId: roomId,
+            chatId
+        };
 
         if (file) {
-            const fileBuffer = fs.readFileSync(file.path);
-            const fileBase64 = fileBuffer.toString("base64");
+            if (file.path) {
+                const fileBuffer = fs.readFileSync(file.path);
+                const fileBase64 = fileBuffer.toString("base64");
 
-            payload.uploads = [{
-                data: "data:" + file.mimetype + ";base64," + fileBase64,
-                type: "file",
-                name: file.originalname,
-            }];
+                payload.files = [{
+                    data: "data:" + file.mimetype + ";base64," + fileBase64,
+                    type: "image",
+                    name: file.originalname,
+                }];
+            } else if (file.url) {
+                payload.files = [{
+                    data: file.url,
+                    type: "image_url",
+                    name: file.originalname,
+                }];
+            }
         }
 
-        const response = await fetch(process.env.FLOWISE_URL + `/api/v1/prediction/${process.env.FLOW_ID}`, {
+
+        console.log("Payload ke Flowise:", payload);
+
+        const response = await fetch(`${process.env.FLOWISE_URL}/api/v1/prediction/${process.env.FLOW_ID}`, {
             method: "POST",
             headers: {
                 Authorization: "Bearer " + process.env.FLOWISE_API_KEY,
@@ -54,8 +73,6 @@ export const createPrediction = async(message, file = null) => {
     } catch (error) {
         console.error("Error dalam prediksi:", error.message);
         return null;
-    } finally {
-        if (file) fs.unlinkSync(file.path);
     }
 };
 
@@ -63,49 +80,115 @@ export const createPrediction = async(message, file = null) => {
 // --- 2. GET LAST BOT REPLY FROM QONTAK
 export const getLastBotReplyFromRoom = async(room_id) => {
     try {
-        const response = await fetch(`
-            https://service-chat.qontak.com/api/open/v1/rooms/${room_id}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${process.env.QONTAK_API_KEY}`,
-                'Content-Type': 'application/json',
+        const response = await fetch(
+            `https://service-chat.qontak.com/api/open/v1/rooms/${room_id}`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${process.env.QONTAK_API_KEY}`,
+                    'Content-Type': 'application/json',
+                }
             }
-        });
+        );
 
         const result = await response.json();
 
         if (result.status === 'success') {
             const lastMessage = result.data && result.data.last_message;
-
-            if (lastMessage && lastMessage.participant_type === 'agent') {
-                console.log("Last bot reply:", lastMessage.text);
-                return lastMessage.text || "";
+            if (lastMessage) {
+                return lastMessage; // return full object
             }
-            return "";
+            return null;
         }
 
         console.error("Gagal ambil last_message dari Qontak.");
-        return "";
+        return null;
     } catch (err) {
         console.error("Error ambil last_message:", err.message);
-        return "";
+        return null;
     }
 };
 
 
-// --- 3. MAIN MESSAGE RECEIVER
+// --- 3. SEPARATE DETAILED QUESTION
+export const isDetailedQuestion = (message, sender) => {
+    const keywords = [
+        "error", "bug", "problem", "tidak bisa", "solusi", "tutorial", "langkah",
+        "asuransi", "kebijakan", "detail", "refund", "penjelasan", "cara kerja",
+        "spesifikasi", "persyaratan", "benefit"
+    ];
+
+    if (sender && sender.participant_type === 'customer') {
+        const lowerMessage = message.toLowerCase();
+        return keywords.some(keyword => lowerMessage.includes(keyword));
+    }
+    return false;
+};
+
+
+// --- 4. MAIN MESSAGE RECEIVER - JOIN MESSAGE
 export const receiveMessage = async(req, res) => {
     const body = req.body;
-    const message = body && body.text ? body.text : "";
+
+    let message = "";
+    let file = null;
+
+    // Handle text atau media
+    if (body.type === "text") {
+        message = body.text || "";
+    } else if (body.type === "image" || body.type === "file" || body.type === "video") {
+        message = body.text || ""; // caption → ternyata di body.text
+
+        // Pastikan file exist
+        if (body.file && body.file.url) {
+            // Ambil filename
+            var filename = "file";
+            if (body.file.filename) {
+                filename = body.file.filename;
+            }
+
+            // Tentukan mimetype berdasarkan ekstensi
+            var mimetype = "";
+            if (filename.toLowerCase().endsWith(".jpeg") || filename.toLowerCase().endsWith(".jpg")) {
+                mimetype = "image/jpeg";
+            } else if (filename.toLowerCase().endsWith(".png")) {
+                mimetype = "image/png";
+            } else if (filename.toLowerCase().endsWith(".pdf")) {
+                mimetype = "application/pdf";
+            } else {
+                console.log("Tipe file tidak dikenali:", filename);
+                return res.status(200).send("Tipe file tidak dikenali.");
+            }
+            file = {
+                url: body.file.url,
+                mimetype: mimetype,
+                name: filename
+            };
+
+        } else {
+            console.log("File payload tidak ditemukan.");
+            return res.status(200).send("File payload tidak ditemukan.");
+        }
+    } else {
+        console.log("Tipe pesan tidak didukung:", body.type);
+        return res.status(200).send("Tipe pesan tidak didukung.");
+    }
+
     const room = body && body.room ? body.room : null;
     const room_id = body && body.room_id ? body.room_id : "";
+    const roomId = room_id ? room_id : (room && room.id ? room.id : "");
     const sender = body && body.sender ? body.sender : null;
+    const chatId = room && room.account_uniq_id ? room.account_uniq_id : "";
 
-    const senderNumber = room && room.account_uniq_id ? room.account_uniq_id : "";
-    const roomId = room_id || (room && room.id ? room.id : "");
+    const channelName = room && room.channel_account ? room.channel_account : "";
+    const allowedChannelName = "Global Komunika";
 
-    if (allowedNumber.indexOf(senderNumber) === -1) {
-        console.log("Nomor " + senderNumber + " tidak diizinkan.");
+    if (channelName !== allowedChannelName) {
+        console.log(`Pesan datang dari channel ${channelName}, diabaikan.`);
+        return res.status(200).send("Channel tidak diizinkan.");
+    }
+
+    if (allowedNumber.indexOf(chatId) === -1) {
+        console.log("Nomor " + chatId + " tidak diizinkan.");
         return res.status(200).send("Nomor tidak diizinkan untuk testing.");
     }
 
@@ -115,23 +198,27 @@ export const receiveMessage = async(req, res) => {
     }
 
     try {
-        // Cek apakah room sudah ditangani agen
+        // Rate limiting
+        const rateLimitKey = `rate_limit:${chatId}`;
+        const currentCount = await redis.incr(rateLimitKey);
+        if (currentCount === 1) await redis.expire(rateLimitKey, 60);
+        if (currentCount > 10) {
+            console.log(`❌ User ${chatId} melewati batas rate limit.`);
+            return res.status(429).send("Terlalu banyak pesan. Silakan tunggu sebentar.");
+        }
+
         const tags = await getRoomTags(roomId);
         if (tags.includes("agen")) {
             console.log("Room sudah ditangani agen, bot tidak akan merespons.");
             return res.status(200).send("Room sudah dialihkan ke agen, bot tidak menangani pesan.");
         }
 
-        // Cek apakah pertanyaan terlalu mendetail dan perlu diteruskan ke agen
-        if (isDetailedQuestion(message)) {
-            await updateRoomTag(roomId, ['agen']);
-            // await takeOverRoom(roomId);
-            console.log("Room diambil alih oleh agen karena pertanyaan mendetail.");
-            return res.status(200).send("Pertanyaan mendetail, agen mengambil alih.");
-        }
-
         const lastBotReply = await getLastBotReplyFromRoom(roomId);
-        if (message.trim() === lastBotReply.trim()) {
+        if (
+            lastBotReply &&
+            lastBotReply.participant_type === "agent" &&
+            message.trim() === (lastBotReply.text || "").trim()
+        ) {
             console.log("Loop terdeteksi: user mengirim ulang pesan yang sebelumnya dibalas bot.");
             return res.status(200).send("Loop terdeteksi, dihentikan.");
         }
@@ -141,34 +228,63 @@ export const receiveMessage = async(req, res) => {
             return res.status(200).send("Loop terdeteksi, dibatalkan.");
         }
 
-        console.log("🚀 Enqueuing job:", { message, senderNumber, roomId });
+        // --- HANDLE DOWNLOAD FILE JIKA ADA ---
+        let tempFile = null;
+        if (file && file.url) {
+            try {
+                await new Promise(resolve => setTimeout(resolve, 1500)); // tunda 1.5 detik
+                tempFile = await downloadFileToTemp(file.url, file.name, file.mimetype);
+                console.log("✅ File berhasil didownload:", tempFile.path);
+            } catch (error) {
+                console.error("❌ Gagal download file:", error.message);
+                return res.status(500).send("Gagal download file.");
+            }
+        }
 
-        await messageQueue.add("handleMessage", {
-            message,
-            senderNumber,
-            roomId,
-            sender
-        }, {
-            attempts: 3,
-            backoff: 3000
-        });
+        // ==== BUFFER MULTI PESAN ====
+        if (!messageBuffers[roomId]) {
+            messageBuffers[roomId] = {
+                messages: [],
+                timeout: null,
+                file: null
+            };
+        }
 
-        return res.status(200).send("Pesan berhasil diproses.");
+        messageBuffers[roomId].messages.push(message);
+        if (tempFile) {
+            messageBuffers[roomId].file = tempFile;
+        }
+
+        if (messageBuffers[roomId].timeout) {
+            clearTimeout(messageBuffers[roomId].timeout);
+        }
+
+        messageBuffers[roomId].timeout = setTimeout(async() => {
+            const fullMessage = messageBuffers[roomId].messages.join(". ");
+            const queuedFile = messageBuffers[roomId].file;
+
+            delete messageBuffers[roomId];
+
+            console.log("⏳ Menggabungkan dan mengirim pesan:", fullMessage);
+
+            await messageQueue.add("handleMessage", {
+                message: fullMessage,
+                roomId,
+                sender,
+                sessionId: roomId,
+                chatId,
+                file: queuedFile
+            }, {
+                attempts: 3,
+                backoff: 3000
+            });
+        }, 8000);
+
+        return res.status(200).send("Pesan diterima & menunggu penggabungan.");
     } catch (error) {
         console.error("Error dalam memproses pesan:", error);
         return res.status(500).send("Terjadi kesalahan dalam memproses permintaan");
     }
-};
-
-
-// --- 4. SEPARATE DETAILED QUESTION
-export const isDetailedQuestion = (message) => {
-    const keywords = ["error", "bug", "problem", "tidak bisa", "solusi", "tutorial", "langkah", "asuransi", "kebijakan", "detail", "refund", "penjelasan", "cara kerja", "spesifikasi", "persyaratan", "add on", "benefit"];
-
-    if (keywords.some(keyword => message.toLowerCase().includes(keyword))) {
-        return true;
-    }
-    return false;
 };
 
 
@@ -276,4 +392,4 @@ export const getRoomTags = async(room_id) => {
 //     } catch (error) {
 //         console.error("Error dalam mengambil alih room:", error);
 //     }
-// };
+// };      console.error("Error dalam mengambil alih room:", error);
