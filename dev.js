@@ -5,7 +5,7 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import dotenv from "dotenv";
-import { receiveMessage } from "./middleware/feat-image.js";
+import { receiveMessage } from "./middleware/feat-dataUsage.js";
 
 dotenv.config();
 

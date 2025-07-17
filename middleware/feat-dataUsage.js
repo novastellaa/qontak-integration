@@ -5,7 +5,7 @@ import messageQueue from "../utils/queue.js";
 import redis from "../utils/redis.js";
 import Logger from "../utils/logger.js";
 import { parseIccidAndOrderId } from "../utils/parse.js";
-import { checkOrderInfo } from "./check-order.js";
+import { checkDataUsageTesting } from "./check-order.js";
 
 
 const app = express();
@@ -26,13 +26,39 @@ export const sanitizeInput = (input) => {
 };
 
 
+function convertTraffic(trafficInKb) {
+    const trafficInMb = trafficInKb / 1000; // Mengonversi KB ke MB
+    const trafficInGb = trafficInMb / 1000; // Mengonversi MB ke GB
+
+    return {
+        trafficInMb: trafficInMb.toFixed(2), // Membatasi dua angka desimal
+        trafficInGb: trafficInGb.toFixed(2), // Membatasi dua angka desimal
+    };
+}
+
+
 // --- 1. CREATE PREDICTION FROM FLOWISE
-export const createPrediction = async(message, roomId, chatId, file = null) => {
-    Logger.info("Pesan diterima:", message);
+export const createPrediction = async(message, roomId, chatId, flowiseContext, file = null) => {
+    console.log("Pesan diterima:", message);
 
     try {
 
         let payload;
+
+        const remainingConverted = convertTraffic(flowiseContext.remainingTraffic);
+        const usedConverted = convertTraffic(flowiseContext.usedTraffic);
+
+        // Menggabungkan data vendor dan pesan
+        const vendorMessage = `
+            ICCID: ${flowiseContext.iccid},
+            Order ID: ${flowiseContext.orderId},
+            Paket: ${flowiseContext.skuName},
+            Sisa Hari: ${flowiseContext.remainingDays},
+            Sisa Kuota: ${remainingConverted.trafficInMb} MB / ${remainingConverted.trafficInGb} GB,
+            Kuota Terpakai: ${usedConverted.trafficInMb} MB / ${usedConverted.trafficInGb} GB
+        `;
+
+        const fullMessage = `${message}\n\n${vendorMessage}`;
 
         if (file && file.url) {
             payload = {
@@ -40,8 +66,8 @@ export const createPrediction = async(message, roomId, chatId, file = null) => {
                     role: "user",
                     content: [{
                             type: "text",
-                            text: message && message.trim().length > 0 ?
-                                message : "Tolong analisa isi gambar ini ya.",
+                            text: fullMessage && fullMessage.trim().length > 0 ?
+                                fullMessage : "Tolong analisa isi gambar ini ya.",
                         },
                         {
                             type: "image_url",
@@ -54,12 +80,14 @@ export const createPrediction = async(message, roomId, chatId, file = null) => {
                 }, ],
                 sessionId: roomId,
                 chatId,
+                flowiseContext
             };
         } else {
             payload = {
-                question: message || "",
+                question: fullMessage || "",
                 sessionId: roomId,
                 chatId,
+                flowiseContext
             };
         }
 
@@ -81,15 +109,16 @@ export const createPrediction = async(message, roomId, chatId, file = null) => {
             );
         }
 
-        // console.log("Payload ke Flowise:", JSON.stringify(payload, null, 2));
         const data = await response.json();
         Logger.info(`Response dari Flowise: ${JSON.stringify(data)}`);
 
         if (data && data.text && data.text.trim()) {
             return data.text;
+
         } else {
             return null;
         }
+
     } catch (error) {
         Logger.error("Error dalam prediksi:", error.message);
         return null;
@@ -267,18 +296,22 @@ export const receiveMessage = async(req, res) => {
         if (parsed.iccid && parsed.orderId) {
             Logger.info(`Detected ICCID ${parsed.iccid} and orderId ${parsed.orderId}`);
 
-            const orderInfo = await checkOrderInfo(parsed.iccid, parsed.orderId);
+            const orderInfo = await checkDataUsageTesting(parsed.iccid, parsed.orderId);
 
-            flowiseContext = {
-                iccid: parsed.iccid,
-                orderId: parsed.orderId,
-                skuName: orderInfo.skuName,
-                remainingDays: orderInfo.remainingDays,
-                remainingTraffic: orderInfo.remainingTraffic,
-                usedTraffic: orderInfo.usedTraffic
-            };
+            if (orderInfo) {
+                flowiseContext = {
+                    iccid: parsed.iccid,
+                    orderId: parsed.orderId,
+                    skuName: orderInfo.vendor.skuName,
+                    remainingDays: orderInfo.vendor.remainingDays,
+                    remainingTraffic: orderInfo.vendor.remainingTraffic,
+                    usedTraffic: orderInfo.vendor.usedTraffic
+                };
 
-            Logger.info("Context ready for Flowise: " + JSON.stringify(flowiseContext));
+                Logger.info("Context ready for Flowise: " + JSON.stringify(flowiseContext));
+            } else {
+                Logger.warn("Data untuk ICCID dan OrderID tidak ditemukan.");
+            }
         }
 
         if (file) {
@@ -303,7 +336,8 @@ export const receiveMessage = async(req, res) => {
             messageBuffers[room_id] = {
                 messages: [],
                 timeout: null,
-                file: null
+                file: null,
+                flowiseContext
             };
         }
 
